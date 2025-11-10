@@ -1,0 +1,23 @@
+# Entornos virtuales
+venv/
+env/
+*.env
+
+# Archivos de caché y compilados de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Carpetas de distribución y construcción
+build/
+dist/
+*.egg-info/
+
+# Archivos de configuración de IDEs
+.vscode/
+.idea/
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
