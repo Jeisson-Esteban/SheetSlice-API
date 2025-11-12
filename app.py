@@ -9,6 +9,38 @@ app = Flask(__name__)
 # Definimos una constante para el tamaño de lote por defecto
 DEFAULT_CHUNK_SIZE = 5000
 
+@app.route('/file-preview', methods=['POST'])
+def file_preview():
+    """
+    Endpoint para previsualizar las cabeceras y las primeras 3 filas de un archivo.
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No se envió ningún archivo'}), 400
+
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'error': 'El archivo enviado está vacío o no tiene nombre.'}), 400
+
+    filename = file.filename.lower()
+    file_extension = os.path.splitext(filename)[1]
+
+    if file_extension not in ['.xlsx', '.csv']:
+        return jsonify({'error': 'Formato no soportado. Usa .xlsx o .csv'}), 400
+
+    try:
+        if file_extension == '.csv':
+            df_preview = pd.read_csv(file, nrows=3)
+        elif file_extension == '.xlsx':
+            df_preview = pd.read_excel(file, nrows=3)
+
+        headers = df_preview.columns.tolist()
+        data_preview = df_preview.to_dict(orient='records')
+
+        return jsonify({'headers': headers, 'data_preview': data_preview})
+    except Exception as e:
+        app.logger.error(f"Error previsualizando el archivo: {e}")
+        return jsonify({'error': f'Ocurrió un error al previsualizar el archivo: {str(e)}'}), 500
+
 @app.route('/split-file', methods=['POST'])
 def split_file():
     # --- MEJORA 1: Validación robusta de chunk_size ---
