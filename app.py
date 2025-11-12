@@ -38,6 +38,23 @@ def split_file():
     zip_buffer = io.BytesIO()
 
     try:
+        # --- NUEVA FUNCIONALIDAD: Generar la vista previa ---
+        # Para generar la vista previa, necesitamos poder leer el inicio del archivo.
+        # Como request.files['file'] es un stream, si lo leemos, el cursor se mueve.
+        # Lo leemos en memoria para poder "rebobinarlo" y usarlo varias veces.
+        file_stream = io.BytesIO(file.read())
+        file.close() # Cerramos el archivo original
+
+        # Generamos el DataFrame de la vista previa (primeras 3 filas)
+        if file_extension == '.csv':
+            df_preview = pd.read_csv(file_stream, nrows=3)
+        elif file_extension == '.xlsx':
+            df_preview = pd.read_excel(file_stream, nrows=3)
+        
+        # Preparamos el JSON de la vista previa
+        preview_data = {'headers': df_preview.columns.tolist(), 'data_preview': df_preview.to_dict(orient='records')}
+        preview_json_str = pd.io.json.dumps(preview_data, indent=2)
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
             # --- MEJORA 2: Procesamiento en trozos para CSV grandes ---
             if file_extension == '.csv':
@@ -51,9 +68,9 @@ def split_file():
                     zipf.writestr(chunk_filename, chunk_buffer.getvalue())
             
             elif file_extension == '.xlsx':
-                # Para XLSX, la lectura por trozos es más compleja, mantenemos la carga completa
-                # pero el resto del código está preparado para manejarlo.
-                df = pd.read_excel(file)
+                # Rebobinamos el stream para leer el archivo completo para la división
+                file_stream.seek(0)
+                df = pd.read_excel(file_stream)
                 for i, start in enumerate(range(0, len(df), chunk_size)):
                     chunk = df.iloc[start:start + chunk_size]
                     chunk_buffer = io.BytesIO()
@@ -61,6 +78,9 @@ def split_file():
                     chunk_filename = f"part_{i+1}.csv"
                     chunk.to_csv(chunk_buffer, index=False, encoding='utf-8') # Usamos to_csv en lugar de to_excel
                     zipf.writestr(chunk_filename, chunk_buffer.getvalue())
+            
+            # Añadimos el archivo de vista previa al ZIP
+            zipf.writestr("_preview.json", preview_json_str)
 
     except Exception as e:
         # Captura errores durante el procesamiento del archivo (ej. archivo corrupto)
