@@ -125,20 +125,27 @@ def extract_headers():
         return jsonify({'error': 'Formato no soportado. Usa .csv'}), 400
 
     try:
-        # 3. Leer solo la primera línea (encabezados) del archivo
-        # Usamos 'utf-8-sig' para manejar el BOM (Byte Order Mark) que algunos editores añaden
-        header_line = file.stream.readline().decode('utf-8-sig').strip()
-        
-        if not header_line:
-            return jsonify({'error': 'El archivo CSV está vacío o no contiene encabezados.'}), 400
+        # 3. Leer el contenido completo del archivo una sola vez
+        # Usamos 'utf-8-sig' para manejar el BOM (Byte Order Mark)
+        file.stream.seek(0)
+        csv_content = file.read().decode('utf-8-sig')
 
-        # 4. Procesar los encabezados y darles el formato solicitado
+        if not csv_content.strip():
+            return jsonify({'error': 'El archivo CSV está vacío.'}), 400
+
+        # 4. Extraer la primera línea (encabezados) del contenido
+        header_line = csv_content.splitlines()[0].strip()
+        
+        # 5. Procesar los encabezados para darles el formato solicitado
         headers = [h.strip() for h in header_line.split(',')]
         # Formatear cada encabezado entre comillas simples y unirlos en un solo string
         formatted_headers = ", ".join([f"'{h}'" for h in headers])
 
-        # 5. Crear y enviar la respuesta JSON
-        response_data = {"input_column_literals": formatted_headers}
+        # 6. Crear y enviar la respuesta JSON completa
+        response_data = {
+            "input_column_literals": formatted_headers,
+            "CSV_content_file": csv_content
+        }
         return jsonify(response_data)
 
     except Exception as e:
