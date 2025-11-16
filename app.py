@@ -107,9 +107,8 @@ def split_file():
         download_name='lotes_divididos.zip'
     )
 
-@app.route('/extract-headers', methods=['POST'])
-def extract_headers():
-    # 1. Verificar que se haya enviado un archivo
+@app.route('/extractjson', methods=['POST'])
+def extractjson():
     if 'file' not in request.files:
         return jsonify({'error': 'No se envió ningún archivo'}), 400
 
@@ -117,40 +116,54 @@ def extract_headers():
     if not file or file.filename == '':
         return jsonify({'error': 'El archivo enviado está vacío o no tiene nombre.'}), 400
 
-    # 2. Validar la extensión del archivo
     filename = file.filename.lower()
     file_extension = os.path.splitext(filename)[1]
 
-    if file_extension != '.csv':
-        return jsonify({'error': 'Formato no soportado. Usa .csv'}), 400
+    if file_extension not in ['.csv', '.zip']:
+        return jsonify({'error': 'Formato no soportado. Usa .csv o .zip'}), 400
 
     try:
-        # 3. Leer el contenido completo del archivo una sola vez
-        # Usamos 'utf-8-sig' para manejar el BOM (Byte Order Mark)
         file.stream.seek(0)
-        csv_content = file.read().decode('utf-8-sig')
+        file_bytes = file.stream.read()
 
-        if not csv_content.strip():
-            return jsonify({'error': 'El archivo CSV está vacío.'}), 400
+        # Función para limpiar cada fila: elimina campos vacíos y limpia espacios
+        def clean_row_dict(row_dict):
+            return {k: v.strip() for k, v in row_dict.items() if str(v).strip() != ''}
 
-        # 4. Extraer la primera línea (encabezados) del contenido
-        header_line = csv_content.splitlines()[0].strip()
-        
-        # 5. Procesar los encabezados para darles el formato solicitado
-        headers = [h.strip() for h in header_line.split(',')]
-        # Formatear cada encabezado entre comillas simples y unirlos en un solo string
-        formatted_headers = ", ".join([f"'{h}'" for h in headers])
+        # Leer CSV y convertir a lista de dicts limpios
+        def read_csv_to_clean_json(csv_bytes):
+            df = pd.read_csv(io.BytesIO(csv_bytes), dtype=str, keep_default_na=False)
+            df = df.fillna('')
+            raw_rows = df.to_dict(orient='records')
+            return [clean_row_dict(row) for row in raw_rows]
 
-        # 6. Crear y enviar la respuesta JSON completa
-        response_data = {
-            "input_column_literals": formatted_headers,
-            "CSV_content_file": csv_content
-        }
-        return jsonify(response_data)
+        if file_extension == '.csv':
+            # Caso 1: Un solo CSV → devuelve array plano como muestras.json
+            data = read_csv_to_clean_json(file_bytes)
+            return jsonify(data)
+
+        else:  # .zip
+            # Caso 2: ZIP → objeto con nombre de archivo como clave
+            result = {}
+            with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as zipf:
+                csv_files = [
+                    f for f in zipf.namelist()
+                    if f.lower().endswith('.csv') and not f.startswith('__MACOSX/')
+                ]
+
+                if not csv_files:
+                    return jsonify({'error': 'No se encontraron archivos CSV dentro del ZIP.'}), 400
+
+                for csv_name in csv_files:
+                    with zipf.open(csv_name) as csv_file:
+                        csv_content = csv_file.read()
+                        result[csv_name] = read_csv_to_clean_json(csv_content)
+
+            return jsonify(result)
 
     except Exception as e:
-        app.logger.error(f"Error extrayendo encabezados: {e}")
-        return jsonify({'error': f'Ocurrió un error al procesar el archivo: {str(e)}'}), 500
+        app.logger.error(f"Error en /extractjson: {e}")
+        return jsonify({'error': f'Error procesando el archivo: {str(e)}'}), 500
 
 if __name__ == "__main__":
     # Render y otros servicios de PaaS usan la variable de entorno PORT
