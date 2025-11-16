@@ -107,6 +107,51 @@ def split_file():
         download_name='lotes_divididos.zip'
     )
 
+@app.route('/extract-headers', methods=['POST'])
+def extract_headers():
+    # 1. Verificar que se haya enviado un archivo
+    if 'file' not in request.files:
+        return jsonify({'error': 'No se envió ningún archivo'}), 400
+
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'error': 'El archivo enviado está vacío o no tiene nombre.'}), 400
+
+    # 2. Validar la extensión del archivo
+    filename = file.filename.lower()
+    file_extension = os.path.splitext(filename)[1]
+
+    if file_extension != '.csv':
+        return jsonify({'error': 'Formato no soportado. Usa .csv'}), 400
+
+    try:
+        # 3. Leer el contenido completo del archivo una sola vez
+        # Usamos 'utf-8-sig' para manejar el BOM (Byte Order Mark)
+        file.stream.seek(0)
+        csv_content = file.read().decode('utf-8-sig')
+
+        if not csv_content.strip():
+            return jsonify({'error': 'El archivo CSV está vacío.'}), 400
+
+        # 4. Extraer la primera línea (encabezados) del contenido
+        header_line = csv_content.splitlines()[0].strip()
+        
+        # 5. Procesar los encabezados para darles el formato solicitado
+        headers = [h.strip() for h in header_line.split(',')]
+        # Formatear cada encabezado entre comillas simples y unirlos en un solo string
+        formatted_headers = ", ".join([f"'{h}'" for h in headers])
+
+        # 6. Crear y enviar la respuesta JSON completa
+        response_data = {
+            "input_column_literals": formatted_headers,
+            "CSV_content_file": csv_content
+        }
+        return jsonify(response_data)
+
+    except Exception as e:
+        app.logger.error(f"Error extrayendo encabezados: {e}")
+        return jsonify({'error': f'Ocurrió un error al procesar el archivo: {str(e)}'}), 500
+
 @app.route('/extractjson', methods=['POST'])
 def extractjson():
     if 'file' not in request.files:
