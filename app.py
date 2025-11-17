@@ -212,26 +212,24 @@ def extractjson():
 
 @app.route('/normalize-and-generate-sql', methods=['POST'])
 def normalize_and_generate_sql():
-    # --- 1. Validación de Entradas (multipart/form-data) ---
-    if 'file' not in request.files:
-        return jsonify({'error': 'No se envió ningún archivo de datos (file)'}), 400
-
-    file = request.files['file']
-    if not file or file.filename == '':
-        return jsonify({'error': 'El archivo de datos está vacío o no tiene nombre.'}), 400
-
-    if not file.filename.lower().endswith('.csv'):
-        return jsonify({'error': 'El archivo de datos debe ser un .csv'}), 400
-
+    # --- 1. Validación de Entradas (ahora espera multipart/form-data) ---
     try:
-        # El diccionario se espera como un campo de texto de formulario llamado 'dictionary'
-        dictionary_data = request.form.get('dictionary')
-        if not dictionary_data:
-            return jsonify({'error': 'No se proporcionó el diccionario de mapeo (dictionary)'}), 400
-        # Convertimos el string JSON del diccionario en una lista de diccionarios de Python
-        dictionary_rows = pd.read_json(dictionary_data, orient='records').to_dict('records')
+        # Leer los campos 'data' y 'dictionary' del formulario.
+        # Nota: El nombre 'dicssionary' de tu ejemplo se corrige a 'dictionary'.
+        data_str = request.form.get('data')
+        dictionary_str = request.form.get('dictionary')
+
+        if not data_str:
+            return jsonify({'error': 'Falta el campo "data" en el form-data.'}), 400
+        if not dictionary_str:
+            return jsonify({'error': 'Falta el campo "dictionary" en el form-data.'}), 400
+
+        # Convertir los strings JSON a objetos Python (listas de diccionarios)
+        raw_data_items = pd.read_json(data_str, orient='records').to_dict('records')
+        dictionary_rows = pd.read_json(dictionary_str, orient='records').to_dict('records')
+
     except Exception as e:
-        return jsonify({'error': f'Error al procesar el diccionario JSON: {str(e)}'}), 400
+        return jsonify({'error': f'Error al procesar los JSON de los campos del formulario: {str(e)}'}), 400
 
     try:
         # --- 2. Normalización (Lógica del primer JS) ---
@@ -248,10 +246,6 @@ def normalize_and_generate_sql():
                 cleaned_variation = variation.strip()
                 if cleaned_variation:
                     lookup_map[cleaned_variation] = standard_key
-
-        # Leer los datos brutos del CSV
-        raw_df = pd.read_csv(file.stream, dtype=str, keep_default_na=False)
-        raw_data_items = raw_df.to_dict(orient='records')
 
         # Normalizar los datos
         normalized_items = []
