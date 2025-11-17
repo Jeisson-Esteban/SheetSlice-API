@@ -212,24 +212,32 @@ def extractjson():
 
 @app.route('/normalize-and-generate-sql', methods=['POST'])
 def normalize_and_generate_sql():
-    # --- 1. Validación de Entradas (ahora espera multipart/form-data) ---
-    try:
-        # Leer los campos 'data' y 'dictionary' del formulario.
-        # Nota: El nombre 'dicssionary' de tu ejemplo se corrige a 'dictionary'.
-        data_str = request.form.get('data')
-        dictionary_str = request.form.get('dictionary')
+    # --- 1. Validación de Entradas (CSV y Diccionario en form-data) ---
+    if 'file' not in request.files:
+        return jsonify({'error': 'No se envió ningún archivo CSV (file)'}), 400
 
-        if not data_str:
-            return jsonify({'error': 'Falta el campo "data" en el form-data.'}), 400
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'error': 'El archivo enviado está vacío o no tiene nombre.'}), 400
+
+    if not file.filename.lower().endswith('.csv'):
+        return jsonify({'error': 'El archivo de datos debe ser un .csv'}), 400
+
+    try:
+        # Leer el diccionario del campo de formulario
+        dictionary_str = request.form.get('dictionary')
         if not dictionary_str:
             return jsonify({'error': 'Falta el campo "dictionary" en el form-data.'}), 400
-
-        # Convertir los strings JSON a objetos Python (listas de diccionarios)
-        raw_data_items = pd.read_json(data_str, orient='records').to_dict('records')
         dictionary_rows = pd.read_json(dictionary_str, orient='records').to_dict('records')
 
+        # --- 2. Extracción de datos del CSV (Lógica de extractjson) ---
+        file.stream.seek(0)
+        # Usamos dtype=str y keep_default_na=False para leer todo como texto
+        df = pd.read_csv(file.stream, dtype=str, keep_default_na=False)
+        raw_data_items = df.to_dict(orient='records')
+
     except Exception as e:
-        return jsonify({'error': f'Error al procesar los JSON de los campos del formulario: {str(e)}'}), 400
+        return jsonify({'error': f'Error al procesar las entradas: {str(e)}'}), 400
 
     try:
         # --- 2. Normalización (Lógica del primer JS) ---
