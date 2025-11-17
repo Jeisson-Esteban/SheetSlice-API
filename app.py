@@ -210,6 +210,142 @@ def extractjson():
         app.logger.error(f"Error en /extractjson: {e}")
         return jsonify({'error': f'Error procesando el archivo: {str(e)}'}), 500
 
+@app.route('/normalize-and-generate-sql', methods=['POST'])
+def normalize_and_generate_sql():
+    # --- 1. Validación de Entradas (multipart/form-data) ---
+    if 'file' not in request.files:
+        return jsonify({'error': 'No se envió ningún archivo de datos (file)'}), 400
+
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'error': 'El archivo de datos está vacío o no tiene nombre.'}), 400
+
+    if not file.filename.lower().endswith('.csv'):
+        return jsonify({'error': 'El archivo de datos debe ser un .csv'}), 400
+
+    try:
+        # El diccionario se espera como un campo de texto de formulario llamado 'dictionary'
+        dictionary_data = request.form.get('dictionary')
+        if not dictionary_data:
+            return jsonify({'error': 'No se proporcionó el diccionario de mapeo (dictionary)'}), 400
+        # Convertimos el string JSON del diccionario en una lista de diccionarios de Python
+        dictionary_rows = pd.read_json(dictionary_data, orient='records').to_dict('records')
+    except Exception as e:
+        return jsonify({'error': f'Error al procesar el diccionario JSON: {str(e)}'}), 400
+
+    try:
+        # --- 2. Normalización (Lógica del primer JS) ---
+
+        # Construir el mapa de búsqueda (lookup map)
+        lookup_map = {}
+        for row in dictionary_rows:
+            standard_key = row.get('valor_estandarizado')
+            origin_keys_str = row.get('nombre_columna_origen')
+            if not standard_key or not origin_keys_str:
+                continue
+            
+            for variation in origin_keys_str.split('|'):
+                cleaned_variation = variation.strip()
+                if cleaned_variation:
+                    lookup_map[cleaned_variation] = standard_key
+
+        # Leer los datos brutos del CSV
+        raw_df = pd.read_csv(file.stream, dtype=str, keep_default_na=False)
+        raw_data_items = raw_df.to_dict(orient='records')
+
+        # Normalizar los datos
+        normalized_items = []
+        for raw_item in raw_data_items:
+            normalized_json = {}
+            for raw_key, raw_value in raw_item.items():
+                cleaned_input_key = raw_key.strip()
+                standard_key = lookup_map.get(cleaned_input_key)
+                if standard_key:
+                    normalized_json[standard_key] = raw_value
+            if normalized_json:
+                normalized_items.append(normalized_json)
+
+        # --- 3. Generación de SQL (Lógica del segundo JS) ---
+
+        if not normalized_items:
+            return jsonify({'error': "No se generaron datos normalizados para procesar."}), 400
+
+        # Definiciones y constantes para el formateo SQL
+        conflict_keys = ['Sales_Order', 'EAN_UPC_Code']
+        headers = list(normalized_items[0].keys())
+
+        numeric_zero_columns = {'Stock_Qty', 'Order_Qty', 'RetailPrice'}
+        zero_if_empty_columns = {'Rejected_Quantity', 'Confirmed_QTY', 'Ordered_QTY'}
+        date_columns = {'Launch_Date', 'Planned_Delivery_Date', 'Rejected_Dt', 'SO_Cr_Date', 'RetailDate'}
+
+        def format_for_sql(value, header):
+            trimmed_value = str(value).strip() if value is not None else ""
+
+            if trimmed_value == "":
+                if header in zero_if_empty_columns:
+                    return '0'
+                return 'NULL'
+
+            is_special_null = trimmed_value.upper() in ("NULL", "*UNK*", "#N/A")
+            if is_special_null:
+                return 'NULL'
+
+            if trimmed_value == "0" and header not in numeric_zero_columns and header not in zero_if_empty_columns:
+                return 'NULL'
+
+            if header in date_columns:
+                try:
+                    # Asume formato DD.MM.YYYY
+                    parts = trimmed_value.split('.')
+                    if len(parts) == 3 and len(parts[2]) == 4:
+                        yyyy_mm_dd = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                        return f"'{yyyy_mm_dd}'"
+                    return 'NULL' # Formato de fecha no esperado
+                except Exception:
+                    return 'NULL'
+
+            # Escapar comillas simples y envolver en comillas
+            escaped_value = trimmed_value.replace("'", "''")
+            return f"'{escaped_value}'"
+
+        # (BLOQUE 1) Crear lista de columnas SQL
+        sql_column_list = ", ".join([f'"{h}"' for h in headers])
+
+        # (BLOQUE 2) Crear string de valores (con deduplicación)
+        value_rows = []
+        seen_keys = set()
+
+        for item in normalized_items:
+            # Crear clave compuesta para deduplicación
+            composite_key_parts = [str(item.get(k, '')) for k in conflict_keys]
+            composite_key = "|".join(composite_key_parts)
+
+            if composite_key in seen_keys:
+                continue
+            seen_keys.add(composite_key)
+
+            # Mapear valores en el mismo orden que los encabezados
+            value_list = [format_for_sql(item.get(h), h) for h in headers]
+            value_rows.append(f"({', '.join(value_list)})")
+        
+        sql_values_string = ',\n'.join(value_rows)
+
+        # (BLOQUE 3) Crear string de actualización para ON CONFLICT
+        sql_update_set = ',\n    '.join([
+            f'"{h}" = EXCLUDED."{h}"' for h in headers if h not in conflict_keys
+        ])
+
+        # --- 4. Devolver el resultado ---
+        return jsonify({
+            'sql_column_list': sql_column_list,
+            'sql_values_string': sql_values_string,
+            'sql_update_set': sql_update_set
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error en /normalize-and-generate-sql: {e}")
+        return jsonify({'error': f'Ocurrió un error inesperado: {str(e)}'}), 500
+
 if __name__ == "__main__":
     # Render y otros servicios de PaaS usan la variable de entorno PORT
     port = int(os.environ.get("PORT", 8080))
