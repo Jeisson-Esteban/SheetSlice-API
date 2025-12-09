@@ -1,79 +1,164 @@
-# SheetSlice API
+# API de Utilidades para Archivos CSV/XLSX
 
-Un microservicio web simple, construido con Python y Flask, diseñado para dividir archivos CSV y XLSX de gran tamaño en múltiples archivos `.csv` más pequeños.
+Esta es una API simple construida con Flask para realizar operaciones comunes en archivos de datos, como dividir archivos grandes, extraer encabezados y convertir datos a formato JSON.
 
-## ✨ Características Principales
+## Endpoints
 
--   **División Inteligente de Archivos**: Procesa archivos `.csv` y `.xlsx` y los divide en lotes según un tamaño de fila especificado por el usuario.
--   **Optimización de Formato**: Convierte automáticamente los lotes de archivos `.xlsx` a formato `.csv`, reduciendo significativamente el tamaño final.
--   **Salida Comprimida**: Devuelve un único archivo `.zip` que contiene todas las partes generadas, listo para descargar y usar.
--   **Procesamiento Eficiente en Memoria**:
-    -   Para archivos `.csv`, utiliza un sistema de lectura por trozos (`chunks`) para manejar archivos de gran tamaño sin agotar la memoria.
-    -   Toda la operación de compresión se realiza en memoria para evitar escrituras innecesarias en disco.
--   **API Fácil de Usar**: Expone un único endpoint que se puede consumir a través de peticiones HTTP estándar.
+### 1. Dividir Archivo (`/split-file`)
 
-## 🛠️ Tecnologías Utilizadas
+Este endpoint divide un archivo `.csv` o `.xlsx` en múltiples archivos `.csv` más pequeños y los devuelve dentro de un archivo `.zip`.
 
--   **Backend**: Python
--   **Framework**: Flask
--   **Manipulación de Datos**: Pandas
--   **Servidor WSGI para Producción**: Gunicorn
+*   **Método:** `POST`
+*   **URL:** `/split-file`
+*   **Parámetros de URL (Query Params):**
+    *   `chunk_size` (opcional): Número de filas por cada archivo dividido.
+        *   **Tipo:** `entero`
+        *   **Valor por defecto:** `5000`
+*   **Cuerpo de la Petición (Body):**
+    *   `multipart/form-data` con un campo `file` que contiene el archivo `.csv` o `.xlsx`.
 
-## 🚀 Cómo Usarlo como API
+#### Respuestas
 
-Una vez que el servicio está en ejecución, puedes enviar una petición `POST` al endpoint `/split-file` con el archivo que deseas dividir.
+*   **Éxito (200 OK):**
+    *   **Content-Type:** `application/zip`
+    *   **Contenido:** Un archivo `lotes_divididos.zip` que contiene:
+        *   `part_1.csv`, `part_2.csv`, ...: Los archivos divididos.
+        *   `sample_data.csv`: Un archivo de muestra con los encabezados y las 3 primeras filas del archivo original.
 
-**Endpoint**: `/split-file`
-**Método**: `POST`
+*   **Error (400 Bad Request):**
+    *   Si no se envía un archivo, el archivo está vacío, el formato no es soportado (`.csv`, `.xlsx`) o `chunk_size` no es un entero positivo.
+    ```json
+    {
+      "error": "Mensaje descriptivo del error."
+    }
+    ```
 
-### Parámetros
+*   **Error (500 Internal Server Error):**
+    *   Si ocurre un error inesperado durante el procesamiento del archivo.
+    ```json
+    {
+      "error": "Ocurrió un error al procesar el archivo: [detalle del error]"
+    }
+    ```
 
--   **`chunk_size`** (parámetro en la URL, opcional): Un número entero que especifica cuántas filas tendrá cada archivo dividido. Si no se proporciona, el valor por defecto es `5000`.
--   **`file`** (en `form-data`): El archivo `.csv` o `.xlsx` que deseas procesar.
-
-### Ejemplo de Petición (usando `curl`)
-
-Este comando divide `archivo_grande.xlsx` en partes de 10,000 filas cada una y guarda el resultado en `lotes.zip`.
+#### Ejemplo de uso con `curl`
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/split-file?chunk_size=10000" \
-     -F "file=@/ruta/a/tu/archivo_grande.xlsx" \
-     -o "lotes.zip"
+# Usando el tamaño de lote por defecto (5000)
+curl -X POST -F "file=@/ruta/a/tu/archivo.csv" "http://localhost:8080/split-file" -o lotes.zip
+
+# Especificando un tamaño de lote de 1000
+curl -X POST -F "file=@/ruta/a/tu/archivo.xlsx" "http://localhost:8080/split-file?chunk_size=1000" -o lotes.zip
 ```
 
-### Respuestas Posibles
+---
 
--   **Éxito (`200 OK`)**: La respuesta será un archivo `lotes_divididos.zip` que contiene las partes del archivo original en formato `.csv`.
--   **Error del Cliente (`400 Bad Request`)**: La respuesta será un JSON con un mensaje de error si falta el archivo, el formato no es soportado o `chunk_size` no es válido.
--   **Error del Servidor (`500 Internal Server Error`)**: La respuesta será un JSON si ocurre un problema inesperado durante el procesamiento del archivo.
+### 2. Extraer Encabezados (`/extract-headers`)
 
-## ⚙️ Cómo Ejecutarlo Localmente
+Este endpoint lee un archivo `.csv`, extrae sus encabezados y devuelve tanto los encabezados formateados como el contenido completo del archivo en una respuesta JSON.
 
-1.  **Clona el repositorio:**
-    ```bash
-    git clone https://github.com/tu-usuario/SheetSlice-API.git
-    cd SheetSlice-API
+*   **Método:** `POST`
+*   **URL:** `/extract-headers`
+*   **Cuerpo de la Petición (Body):**
+    *   `multipart/form-data` con un campo `file` que contiene el archivo `.csv`.
+
+#### Respuestas
+
+*   **Éxito (200 OK):**
+    *   **Content-Type:** `application/json`
+    *   **Contenido:** Un objeto JSON con dos claves:
+        *   `input_column_literals`: Un string con los nombres de las columnas entre comillas simples y separados por comas (ej: `'col1', 'col2', 'col3'`).
+        *   `CSV_content_file`: Un string con el contenido completo del archivo CSV.
+
+*   **Error (400 Bad Request):**
+    *   Si no se envía un archivo, el archivo está vacío o el formato no es `.csv`.
+
+*   **Error (500 Internal Server Error):**
+    *   Si ocurre un error inesperado durante la lectura del archivo.
+
+#### Ejemplo de uso con `curl`
+
+```bash
+curl -X POST -F "file=@/ruta/a/tu/archivo.csv" "http://localhost:8080/extract-headers"
+```
+
+---
+
+### 3. Extraer a JSON (`/extractjson`)
+
+Este endpoint convierte el contenido de un archivo `.csv` o de múltiples archivos `.csv` dentro de un `.zip` a formato JSON.
+
+*   **Método:** `POST`
+*   **URL:** `/extractjson`
+*   **Cuerpo de la Petición (Body):**
+    *   `multipart/form-data` con un campo `file` que contiene el archivo `.csv` o `.zip`.
+
+#### Lógica de Conversión
+
+*   Cada fila del CSV se convierte en un objeto JSON.
+*   Las columnas con valores vacíos o que solo contienen espacios en blanco se omiten del objeto JSON resultante para esa fila.
+
+#### Respuestas
+
+*   **Éxito (200 OK):**
+    *   **Content-Type:** `application/json`
+    *   **Si el input es un `.csv`:** Devuelve un array de objetos JSON.
+        ```json
+        [
+          { "col1": "valorA", "col2": "valorB" },
+          { "col1": "valorC", "col3": "valorD" }
+        ]
+        ```
+    *   **Si el input es un `.zip`:** Devuelve un objeto donde cada clave es el nombre de un archivo CSV dentro del ZIP, y su valor es el array de objetos JSON correspondiente.
+        ```json
+        {
+          "archivo1.csv": [
+            { "col1": "valorA" },
+            { "col1": "valorB" }
+          ],
+          "archivo2.csv": [
+            { "id": "123", "name": "test" }
+          ]
+        }
+        ```
+
+*   **Error (400 Bad Request):**
+    *   Si no se envía un archivo, el archivo está vacío, el formato no es soportado (`.csv`, `.zip`) o el ZIP no contiene archivos CSV.
+
+*   **Error (500 Internal Server Error):**
+    *   Si ocurre un error inesperado durante el procesamiento.
+
+#### Ejemplo de uso con `curl`
+
+```bash
+# Con un archivo CSV
+curl -X POST -F "file=@/ruta/a/tu/archivo.csv" "http://localhost:8080/extractjson"
+
+# Con un archivo ZIP
+curl -X POST -F "file=@/ruta/a/tu/archivos.zip" "http://localhost:8080/extractjson"
+```
+
+---
+
+### 4. Health Check (`/health`)
+
+Endpoint simple para verificar que la aplicación está en funcionamiento. Es útil para servicios de monitoreo o para mantener activa la aplicación en plataformas de hosting gratuitas.
+
+*   **Método:** `GET`
+*   **URL:** `/health`
+
+#### Respuestas
+
+*   **Éxito (200 OK):**
+    ```json
+    {
+      "status": "ok",
+      "message": "La aplicación está activa."
+    }
     ```
 
-2.  **Crea y activa un entorno virtual (recomendado):**
-    ```bash
-    # Para macOS/Linux
-    python3 -m venv venv
-    source venv/bin/activate
+#### Ejemplo de uso con `curl`
 
-    # Para Windows
-    python -m venv venv
-    .\venv\Scripts\activate
-    ```
-
-3.  **Instala las dependencias:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4.  **Inicia la aplicación con Gunicorn:**
-    ```bash
-    gunicorn "app:app"
-    ```
-
-¡Listo! La API estará disponible en `http://127.0.0.1:8000`.
+```bash
+curl "http://localhost:8080/health"
+```
